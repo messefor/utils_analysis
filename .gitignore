@@ -1,0 +1,25 @@
+
+
+# Archives / Data Formats
+*.bz2
+*.pkl
+*.zip
+
+*.rds
+*.csv
+
+# Image files
+*.png
+*.jpg
+
+
+# Cache files
+.vscode/
+.ipynb_checkpoints/
+__pycache__/
+.DS_Store
+
+# Virtual Environments
+.venv/
+
+!.gitkeep
