@@ -2,7 +2,10 @@
 import time
 import numpy as np
 import pandas as pd
+from scipy.stats import kurtosis, skew, mode
+
 import warnings
+
 
 from abc import ABCMeta, abstractmethod
 
@@ -90,13 +93,20 @@ class BaseWindowFeatsExtactor(metaclass=ABCMeta):
 
 
 # ----------------------------------------------------------------
+# Calculate basic statistical features
+# ----------------------------------------------------------------
+
+def mode_value(x):
+  return mode(x).mode[0]
+
+STATS_FUNCS = {'mean': np.mean, 'std': np.std,
+                'median': np.median, 'mode': mode_value,
+                'kurtosis': kurtosis, 'skew': skew}
 
 class StatWindowFeatsExtractor(BaseWindowFeatsExtactor):
   '''Statistic Features '''
 
-  def __init__(self, target_cols,
-              funcs={'mean': np.mean, 'std': np.std, 'median': np.median},
-              null_value=np.nan):
+  def __init__(self, target_cols, funcs=STATS_FUNCS, null_value=np.nan):
 
     self.target_cols = target_cols
     self.funcs = funcs
@@ -107,13 +117,33 @@ class StatWindowFeatsExtractor(BaseWindowFeatsExtactor):
                         for k, f in self.funcs.items()}
 
   def transform(self, d: pd.DataFrame) -> dict:
-
     if d is None:
       return self.value_missings
     else:
       return {col + '_' + k: f(d[col].values)
                     for col in self.target_cols
                       for k, f in self.funcs.items()}
+
+StatsWFExtractor = StatWindowFeatsExtractor  # Ailias
+
+
+# ----------------------------------------------------------------
+# Calculate linear trend (slope in time window)
+# ----------------------------------------------------------------
+
+class LinearTrendWFExtractor(BaseWindowFeatsExtactor):
+  '''Linear trend features '''
+
+  def __init__(self, target_cols, suffix='lincoef'):
+    self.target_cols = target_cols
+    self.suffix = suffix
+
+  def transform(self, d: pd.DataFrame) -> dict:
+    x = np.arange(d.shape[0])
+    Y = d[self.target_cols].values
+    corrs = np.corrcoef(x, Y.T)[0, 1:]
+    return {a + '_' + self.suffix: b
+              for a, b in zip(self.target_cols, corrs)}
 
 
 
