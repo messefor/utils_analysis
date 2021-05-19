@@ -1,16 +1,18 @@
 
 import time
+import warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import kurtosis, skew, mode
+from scipy import signal
+from sklearn.linear_model import LinearRegression
 
-import warnings
 
 
 from abc import ABCMeta, abstractmethod
 
 from .window import WindowGenerator
-
+from .misc import concat_dict, update_kwargs
 
 # ---------------------------------------------------------------------------
 
@@ -90,8 +92,6 @@ class BaseWindowFeatsExtactor(metaclass=ABCMeta):
     return feats_df
 
 
-
-
 # ----------------------------------------------------------------
 # Calculate basic statistical features
 # ----------------------------------------------------------------
@@ -132,18 +132,132 @@ StatsWFExtractor = StatWindowFeatsExtractor  # Ailias
 # ----------------------------------------------------------------
 
 class LinearTrendWFExtractor(BaseWindowFeatsExtactor):
-  '''Linear trend features '''
+  '''Linear trend features
 
-  def __init__(self, target_cols, suffix='lincoef'):
+
+  Return
+  ---------------------
+  dict
+    * corr_coef corrcoef with time index
+  '''
+
+
+  def __init__(self, target_cols, col_time=None, lr_kwargs=None):
+
     self.target_cols = target_cols
-    self.suffix = suffix
+    self.col_time = col_time
+    self.lr_kwarg = lr_kwargs
+
+    self.suffix_corr = 'corr_coef'
+    self.suffix_lr = 'lr_coef'
+
+    default_kwargs = dict(fit_intercept=True,
+                          normalize=False)
+
+    self.kwargs = update_kwargs(lr_kwargs, default_kwargs)
 
   def transform(self, d: pd.DataFrame) -> dict:
-    x = np.arange(d.shape[0])
+
+    # Corrcoef
+    # Both will be the same if time index is evenly sampled with no missings
+    if self.col_time is None:
+      x = np.arange(d.shape[0])
+    else:
+      x = d[self.col_time].values - min(d[self.col_time].values)
+
     Y = d[self.target_cols].values
     corrs = np.corrcoef(x, Y.T)[0, 1:]
-    return {a + '_' + self.suffix: b
-              for a, b in zip(self.target_cols, corrs)}
+    feats_corr = {a + '_' + self.suffix_corr: b
+                  for a, b in zip(self.target_cols, corrs)}
+
+    # LinearFit slope
+    feats_coef = {}
+    X = x.reshape(-1, 1)
+    for col in self.target_cols:
+      estimator = LinearRegression(**self.kwargs)
+      estimator.fit(X, d[col].values)
+      feats_coef[col + '_' + self.suffix_lr] = estimator.coef_[0]
+
+    return concat_dict(feats_corr, feats_coef)
+
+
+# ----------------------------------------------------------------
+# Calculate peak count
+# ----------------------------------------------------------------
+
+def get_filter_coef(fs, cutoff, numtaps, a=1,
+                  kwargs=dict(window='hann')):
+  '''Calculate FIR Lowpass filter coefficents'''
+
+  dt = 1 / fs
+  fn = fs / 2
+  Wp = cutoff / fn
+  b = signal.firwin(numtaps, Wp, **kwargs)
+  return b, a
+
+
+class PeakCountWFExtractor(BaseWindowFeatsExtactor):
+  '''Peak count features '''
+
+  def __init__(self, target_col, peak_finder=signal.find_peaks,
+              fs=None, cutoff=None, numtaps=None,
+              firwin_kwargs=dict(window='hann')):
+    '''
+
+    Parameters
+    ----------------------
+    fs  : int, default=None
+      sampling frequency. Use when applying lowpass filter
+    cutoff  : float, default=None
+      cutoff frequency of FIR low pass filter. Use when applying lowpass filter
+    numtaps  : int, default=None
+      number of tups of FIR low pass filter. Use when applying lowpass filter
+
+    '''
+
+    self.suffix = 'n_peaks'
+
+    self.target_col = target_col
+
+    if fs is not None:
+
+      if (cutoff is None) or (numtaps is None):
+        msg = 'If you apply lowpass filter fs, cutoff, numtaps should be passed.'
+        raise ValueError(msg)
+
+      self.apply_lp = True
+
+      b, a = get_filter_coef(fs, cutoff, numtaps, a=1, kwargs=firwin_kwargs)
+      self.b = b
+      self.a = a
+
+      self.fs =fs
+      self.cutoff = cutoff
+      self.numtaps = numtaps
+      self.delay = int((self.numtaps-1)/2)
+
+    else:
+      self.apply_lp = False
+
+    self.peak_finder = peak_finder
+
+  def transform(self, d: pd.DataFrame) -> dict:
+
+    feats = {}
+
+    y = d[self.target_col].values
+
+    if self.apply_lp:
+      y_lp = signal.lfilter(self.b, self.a, y)
+      y = np.concatenate([y_lp[self.delay:], np.repeat(np.nan, self.delay)])
+
+    self.y = y
+
+    self.peak_inds, _ = self.peak_finder(y)
+    n_peaks = len(self.peak_inds)
+    feats[self.target_col + '_' + self.suffix] = n_peaks
+
+    return feats
 
 
 
