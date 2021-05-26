@@ -1,3 +1,4 @@
+'''Utilities for checking data'''
 
 import pandas as pd
 import numpy as np
@@ -6,6 +7,7 @@ import warnings
 
 
 def is_invalid_df(X, axis=0):
+  '''Check whether DataFrame has invalid values'''
 
   cond_list = []
   labels = []
@@ -56,6 +58,7 @@ def is_invalid_df(X, axis=0):
 
 
 def get_invalid(X, axis=0, return_where=False):
+  '''Get which columns/rows has invalid values'''
 
   cond_df, is_invalid_arr = is_invalid_df(X, axis)
 
