@@ -13,6 +13,8 @@ from abc import ABCMeta, abstractmethod
 
 from .window import WindowGenerator
 from .misc import concat_dict, update_kwargs
+from .psd import calc_psd
+from .hrv import HRVFreq, HRVTime
 
 # ---------------------------------------------------------------------------
 
@@ -104,7 +106,7 @@ STATS_FUNCS = {'mean': np.mean, 'std': np.std,
                 'kurtosis': kurtosis, 'skew': skew}
 
 class StatWindowFeatsExtractor(BaseWindowFeatsExtactor):
-  '''Statistic Features '''
+  '''Statistic Features'''
 
   def __init__(self, target_cols, funcs=STATS_FUNCS, null_value=np.nan):
 
@@ -259,5 +261,166 @@ class PeakCountWFExtractor(BaseWindowFeatsExtactor):
 
     return feats
 
+# -------------------------------------------------------------
+hrv_freq_bands = {
+    'ULF': (.0, 0.0033),
+    'VLF': (0.0033, 0.04),
+    'LF': (0.04, 0.15),
+    'HF': (0.15, 0.4),
+    }
 
+def sum_band_powers(f, pxx, integ_func=np.trapz, f_bands=hrv_freq_bands):
+    pwrs = {}
+    for k, band in f_bands.items():
+        lower, upper = band
+        x = np.logical_and(f >= lower, f <= upper)
+        pwrs[k] = integ_func(pxx[x], f[x])
+    return pwrs
+
+
+class PSDWFExtractor(BaseWindowFeatsExtactor):
+  '''Frequency(Power spectrum density) features'''
+
+  def __init__(self, target_cols, time_col, fs, freq_ub=None, freq_lb=None,
+              method='periodogram', scaling='density', time_units='sec',
+              psd_kws=None, f_bands=None):
+    '''
+
+    Parameters
+    ----------------------
+
+
+    '''
+
+    self.suffix = 'psd_{freq:}hz'
+
+    self.target_cols = target_cols
+    self.time_col = time_col
+
+    self.fs = fs
+    self.method = method
+    self.time_units = time_units
+    self.scaling = scaling
+    self.psd_kws = {} if psd_kws is None else psd_kws
+    self.f_bands = f_bands
+
+    if freq_ub is None and freq_lb is None:
+      self.cond_func = lambda x: True
+    if freq_ub is not None and freq_lb is None:
+      self.cond_func = lambda x: x < freq_ub
+    if freq_ub is None and freq_lb is not None:
+      self.cond_func = lambda x: x > freq_lb
+    if freq_ub is not None and freq_lb is not None:
+      self.cond_func = lambda x: x > freq_lb and x < freq_ub
+
+  def transform(self, d: pd.DataFrame) -> dict:
+
+    feats_all = {}
+
+    x = d[self.time_col].values
+
+    for target_col in self.target_cols:
+
+      y = d[target_col].values
+
+      f, pxx = calc_psd(x, y, fs=self.fs, method=self.method,
+                        psd_kws=self.psd_kws,
+                        scaling=self.scaling, units=self.time_units)
+
+      self.f = f
+      self.pxx = pxx
+
+      if self.f_bands is None:
+        featnm = target_col + '_' + self.suffix
+        feats = {featnm.format(freq=freq): pw
+                      for freq, pw in zip(f, pxx) if self.cond_func(freq)}
+      else:
+        feats = sum_band_powers(f, pxx, f_bands=self.f_bands)
+        feats = {target_col + '_' + fnm: pw
+                      for fnm, pw in feats.items()}
+
+      feats_all.update(feats)
+
+    return feats_all
+
+
+# ----------------------------------------------------------------
+# Calculate HRV Features
+# ----------------------------------------------------------------
+
+
+class HRVTimeWFExtractor(BaseWindowFeatsExtactor):
+  '''HRV Time feature extractor
+
+
+  Return
+  ---------------------
+  dict
+
+  '''
+
+  def __init__(self, col_rri, col_time, thresh_d=None, units='sec',
+                      consider_seq_missing=True):
+    self.col_rri = col_rri
+    self.col_time = col_time
+    self.hrv = HRVTime(thresh_d=thresh_d, units=units,
+                        consider_seq_missing=consider_seq_missing)
+
+  def transform(self, d: pd.DataFrame) -> dict:
+    x = d[self.col_time].values
+    y = d[self.col_rri].values
+    return self.hrv.calc(x, y)
+
+
+class HRVFreqWFExtractor(BaseWindowFeatsExtactor):
+  '''HRV Frequency feature extractor
+
+
+  Return
+  ---------------------
+  dict
+
+  '''
+
+  def __init__(self, col_rri, col_time, fs, method='periodogram',
+                do_resample=False, fs_res=None, psd_kws=None, units='sec'):
+
+    self.col_rri = col_rri
+    self.col_time = col_time
+
+    self.hrv = HRVFreq(fs, method=method, do_resample=do_resample,
+                        fs_res=fs_res, psd_kws=psd_kws, units=units)
+
+  def transform(self, d: pd.DataFrame) -> dict:
+    x = d[self.col_time].values
+    y = d[self.col_rri].values
+    return self.hrv.calc(x, y)
+
+
+# ----------------------------------------------------------------
+# EDA Features
+# ----------------------------------------------------------------
+class SCRWFExtractor(BaseWindowFeatsExtactor):
+  '''EDA SCR Extractor'''
+
+  def __init__(self, target_cols, amp_threshs=[0.01, 0.05]):
+    self.target_cols = target_cols
+    self.amp_threshs = amp_threshs
+
+
+  def transform(self, d: pd.DataFrame) -> dict:
+
+    col_value = 'amp'
+
+    feat_dict = {}
+
+    for col_value in self.target_cols:
+      d_droped = d[col_value].dropna()
+      feat_dict[col_value + '_' + 'len'] = d_droped.shape[0]
+      feat_dict[col_value + '_' + 'sum'] = d_droped.sum()
+      for thresh in self.amp_threshs:
+        feat_dict[col_value + '_' + f'cnt{thresh:.2f}'] =\
+                                    (d_droped >= thresh).sum()
+
+    return feat_dict
 
