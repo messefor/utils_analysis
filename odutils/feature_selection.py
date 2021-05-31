@@ -1,6 +1,7 @@
 
 import numpy as np
 import pandas as pd
+from copy import deepcopy
 
 import warnings
 
@@ -9,6 +10,127 @@ from mlxtend.feature_selection import SequentialFeatureSelector as SFS
 
 from .misc import cnv2ndarray
 from .train import  CVTrainer
+from .metrics import RMSE
+
+def calc_null_importance(estimator, X, y, n_trials=100,
+                          random_state=None, fit_kwargs=None) -> pd.DataFrame:
+  '''Calculate null imporance
+
+  Returns
+  -------------
+  null imporance pd.DataFrame
+
+  '''
+
+  if random_state is not None:
+    np.random.seed(random_state)
+
+  fit_kwargs = {} if fit_kwargs is None else fit_kwargs
+  est = deepcopy(estimator)
+
+  est.fit(X, y, **fit_kwargs)
+
+  fi_base = est.feature_importances_
+
+  fi_null = []
+  for num_trial in range(n_trials):
+
+    y_shuffled = y.copy()
+    np.random.shuffle(y_shuffled)
+    est = deepcopy(estimator)
+    est.fit(X, y_shuffled)
+    fi_null.append(est.feature_importances_)
+
+  fi_null = np.array(fi_null)
+
+  fi_null_mean = fi_null.mean(axis=0)
+  fi_null_max = fi_null.max(axis=0)
+  fi_null_p70, fi_null_p80, fi_null_p90 =\
+    np.percentile(fi_null, q=[70, 80, 90], axis=0)
+
+  fi_info = dict(feats_nm=X.columns,
+              fi_base=fi_base,
+              fi_null_mean=fi_null_mean,
+              fi_null_p70=fi_null_p70,
+              fi_null_p80=fi_null_p80,
+              fi_null_p90=fi_null_p90,
+              fi_null_p100=fi_null_max
+              )
+
+  fi = pd.DataFrame(fi_info)
+
+  fi['fi_diff'] = fi['fi_base'] - fi['fi_null_mean']
+  fi['is_base_exc_p100'] = fi['fi_base'] > fi['fi_null_p100']
+  fi['is_base_exc_p90'] = fi['fi_base'] > fi['fi_null_p90']
+  fi['is_base_exc_p70'] = fi['fi_base'] > fi['fi_null_p70']
+
+  fi = fi.sort_values(by='fi_base', ascending=False)
+
+  return fi
+
+
+def select_feats_null_importance_based(estimator, X, y, n_trials=100,
+                                       criteria='is_base_exc_p100', random_state=None):
+  '''Select feats based on null importance'''
+  fi = calc_null_importance(estimator, X, y, n_trials=n_trials,
+                                random_state=random_state)
+  return fi.loc[fi[criteria], 'feats_nm'].values
+
+
+def calc_perm_importance(estimator, X, y, n_trials=10, scoring=RMSE,
+                                       random_state=None):
+
+  if random_state is not None:
+    np.random.seed(random_state)
+
+  y_pred = estimator.predict(X)
+  score_base = scoring(y, y_pred)
+
+  imp_all_trials = []
+  target_cols = X.columns
+  for num_trial in range(n_trials):
+
+    print('num_trial:', num_trial)
+
+    score_list = []
+    ids = np.random.permutation(range(target_cols.shape[0]))
+    for i in ids:
+
+      col_shuffle = target_cols[i]
+
+      Xs = X.copy()
+      Xs[col_shuffle] = np.random.permutation(Xs[col_shuffle])
+
+      y_pred_s = estimator.predict(Xs)
+
+      score_s = scoring(y, y_pred_s)
+      r = dict(i=i, feats_nm=col_shuffle, score=score_s, num_trial=num_trial)
+      score_list.append(r)
+
+      parm_impo = pd.DataFrame(score_list).sort_values(by='i').reset_index(drop=True)
+
+      imp_all_trials.append(parm_impo)
+
+  imp_all = pd.concat(imp_all_trials, axis=0)
+  imp_all_agg = imp_all.groupby(['feats_nm', 'i'], as_index=False)
+  pimp = imp_all_agg['score'].mean().sort_values(by='i').reset_index(drop=True)
+
+  pimp['score_base'] = score_base
+  pimp['score_d'] = pimp['score'] - score_base
+  pimp['importance'] = (pimp['score'] - score_base) / score_base
+
+  return pimp.sort_values(by='importance', ascending=False).reset_index(drop=True)
+
+
+def select_feats_parm_importance_based(estimator, X, y, n_trials=10,
+                                       thresh=0.05, random_state=None):
+  '''Select feats based on parmutation importance'''
+  fi = calc_perm_importance(estimator, X, y, n_trials=n_trials,
+                                random_state=random_state)
+  return fi.loc[fi['score_d'] > thresh, 'feats_nm'].values
+
+# --------------------------------------------------------------
+
 
 def corrcoef_Xy(X: np.ndarray, y: np.ndarray) -> np.ndarray:
   '''Calculate corrcoef between X and y'''
@@ -41,7 +163,6 @@ def check_has_variance(X: pd.DataFrame,
   has_variance = np.array(conds).all(axis=0)
 
   return has_variance
-
 
 
 def filter_useless_feats(X, y, thresh_std=0, **kwargs):
@@ -87,7 +208,6 @@ def filter_useless_feats(X, y, thresh_std=0, **kwargs):
     print(msg_tmp.format(n_feats_before, sum(~has_mutual_info), 'mutual info'))
 
   return X
-
 
 
 def calc_univar_model_metrics(estimator,
