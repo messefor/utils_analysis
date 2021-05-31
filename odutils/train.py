@@ -11,7 +11,7 @@ import toml
 
 
 from sklearn.model_selection import GroupKFold
-from utils.eval import MetricsCalc
+from .metrics import MetricsCalculator
 
 
 
@@ -23,7 +23,7 @@ class CVTrainer:
   def __init__(self, X_train: pd.DataFrame,
               y_train: (pd.Series, np.ndarray),
               groups_train: (pd.Series, np.ndarray), x_vars=None,
-              metrics_calc=MetricsCalc(), sample_weight=None):
+              metrics_calc=MetricsCalculator(), sample_weight=None):
 
     self.X_train = X_train
     self.y_train = y_train.values \
