@@ -30,7 +30,8 @@ def calc_null_importance(estimator, X, y, n_trials=100,
 
   est.fit(X, y, **fit_kwargs)
 
-  fi_base = est.feature_importances_
+  fi_base = extract_importance(est, with_intercept=False)
+  # fi_base = est.feature_importances_
 
   fi_null = []
   for num_trial in range(n_trials):
@@ -39,7 +40,7 @@ def calc_null_importance(estimator, X, y, n_trials=100,
     np.random.shuffle(y_shuffled)
     est = deepcopy(estimator)
     est.fit(X, y_shuffled)
-    fi_null.append(est.feature_importances_)
+    fi_null.append(extract_importance(est, with_intercept=False))
 
   fi_null = np.array(fi_null)
 
@@ -64,7 +65,7 @@ def calc_null_importance(estimator, X, y, n_trials=100,
   fi['is_base_exc_p90'] = fi['fi_base'] > fi['fi_null_p90']
   fi['is_base_exc_p70'] = fi['fi_base'] > fi['fi_null_p70']
 
-  fi = fi.sort_values(by='fi_base', ascending=False)
+  fi = fi.sort_values(by='fi_diff', ascending=False)
 
   return fi
 
@@ -119,10 +120,11 @@ def calc_perm_importance(estimator, X, y, n_trials=10, scoring=RMSE,
   pimp['score_d'] = pimp['score'] - score_base
   pimp['importance'] = (pimp['score'] - score_base) / score_base
 
-  return pimp.sort_values(by='importance', ascending=False).reset_index(drop=True)
+  return pimp.sort_values(by='importance',
+                          ascending=False).reset_index(drop=True)
 
 
-def select_feats_parm_importance_based(estimator, X, y, n_trials=10,
+def select_feats_perm_importance_based(estimator, X, y, n_trials=10,
                                        thresh=0.05, random_state=None):
   '''Select feats based on parmutation importance'''
   fi = calc_perm_importance(estimator, X, y, n_trials=n_trials,

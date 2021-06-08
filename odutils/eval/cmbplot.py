@@ -16,7 +16,49 @@ from .baseplot import (plot_ts_pred_true, plot_scatter,
                         put_metrics_text_on_anyax,
                         plot_roc, put_metrics_text_on_roc,
                         put_metrics_text_on_ax,
-                        plot_res_hist, plot_cm)
+                        plot_res_hist, plot_cm, plot_qq,
+                        plot_index_vs_error)
+
+
+def plot_error_diag(res, prefix=None):
+  '''Error diagnostics plot
+
+  Parameter
+  ------------
+  res array-like residual
+  prefix str
+  '''
+  prefix = '' if prefix is None else prefix
+
+  fig, axes = plt.subplots(figsize=(10, 8), nrows=2, ncols=2)
+
+  # Error histogram
+  ax = axes[0, 0]
+  params = dict(bins=15, edgecolor='white', alpha=.7)
+  _ = ax.hist(res, **params)
+  ax.axvline(0, color='black', lw=1)
+  ax.set_title('Error distribution')
+  ax.set_title(prefix + ' ' + ax.get_title())
+
+  # Error boxplot
+  ax = axes[0, 1]
+  ax.boxplot(res)
+  ax.set_ylabel('Residuals(Error)')
+  ax.set_title('Error distribution')
+  ax.set_title(prefix + ' ' + ax.get_title())
+
+  # Index vs error
+  ax = axes[1, 0]
+  fig, ax = plot_index_vs_error(res, ax=ax)
+  ax.set_title(prefix + ' ' + ax.get_title())
+
+  # QQ plot
+  ax = axes[1, 1]
+  fig, ax = plot_qq(res, ax=ax)
+  ax.set_title('Q-Q Plot')
+  ax.set_title(prefix + ' ' + ax.get_title())
+
+  return fig, axes
 
 
 def plot_eval_cmb(y_train, y_train_pred, y_val, y_val_pred, thresh,

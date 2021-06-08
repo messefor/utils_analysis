@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from copy import deepcopy
+from scipy.stats import norm
 
 import seaborn as sns
 
@@ -452,3 +453,72 @@ def plot_importance(est, feats_nm, top_n=20, ax=None, max_feats_nm_len=20):
     return fig, ax
 
 
+# -----------------------------------------------------------------
+# Error diag
+# -----------------------------------------------------------------
+
+def plot_index_vs_error(res, ax=None):
+
+  if ax is None:
+    fig, ax = plt.subplots(figsize=(12, 5))
+  else:
+    fig = ax.get_figure()
+
+  ax.scatter(range(len(res)), res, marker='x', s=10, alpha=.5)
+
+  ax.axhline(0, color='grey', lw=1)
+
+  sd = np.std(res)
+  ax.axhline(2 * sd, color='red', lw=1, ls='--', label='+2sd')
+  ax.axhline(-2 * sd, color='red', lw=1, ls='--', label='-2sd')
+
+  ax.grid(ls='--', color='grey', lw=.5)
+  ax.set_ylabel('Residual(Error)')
+  ax.set_xlabel('index')
+
+  title = 'index vs residuals'
+  ax.set_title(title)
+  ax.legend()
+
+  return fig, ax
+
+  
+def plot_qq(res, ax=None):
+  '''Q-Q Plot
+
+  Parameter
+  ------------
+  res array-like residual
+  '''
+
+  if ax is None:
+    fig, ax = plt.subplots(figsize=(5, 5))
+  else:
+    fig = ax.get_figure()
+
+  # Standardize
+  # res = res - np.mean(res)
+  res = res / np.std(res)
+
+  res_sorted = np.sort(res)
+  # res_cumsum = np.cumsum(res_sorted)
+
+  q = np.arange(len(res_sorted)) / len(res_sorted)
+  # p = np.percentile(res, q=q)
+
+  norm_values = norm.ppf(q)
+
+  ax.scatter(norm_values, res_sorted, marker='x', s=5, alpha=.7)
+
+  x = np.linspace(*ax.get_xlim(), 10)
+
+  # Plot line
+  ax.plot(x, x, color='grey', ls='--', lw=.5)
+
+  ax.set_xlabel('Normal distribution')
+  ax.set_ylabel('Standardized error distribution')
+  ax.set_title('qq plot')
+
+  ax.grid(ls='--', color='grey', lw=.5)
+
+  return fig, ax
