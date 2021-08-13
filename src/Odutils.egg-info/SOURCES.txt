@@ -10,9 +10,11 @@ src/odutils/__init__.py
 src/odutils/check.py
 src/odutils/feature_extractors.py
 src/odutils/feature_selection.py
+src/odutils/hrv.py
 src/odutils/logging.py
 src/odutils/metrics.py
 src/odutils/misc.py
+src/odutils/psd.py
 src/odutils/train.py
 src/odutils/window.py
 src/odutils/eval/__init__.py
